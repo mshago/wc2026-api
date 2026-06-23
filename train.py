@@ -12,7 +12,7 @@ import os, urllib.request
 import numpy as np, pandas as pd, pymc as pm, pytensor.tensor as pt
 import geo
 
-RNG = 42; WINDOW_START = "2021-01-01"; DECAY = 0.40; S = 1500
+RNG = 42; WINDOW_START = "2021-01-01"; DECAY = 0.10; S = 1500
 DATA_URL = "https://raw.githubusercontent.com/martj42/international_results/master/results.csv"
 
 if not os.path.exists("results.csv"):
@@ -41,7 +41,10 @@ print(f"Training on {len(m)} matches, {n} teams. "
 with pm.Model():
     intercept = pm.Normal("intercept", 0, 1); home = pm.Normal("home", 0.25, 0.25)
     sa = pm.HalfNormal("sa", 1); sd = pm.HalfNormal("sd", 1)
-    ar = pm.Normal("ar", 0, sa, shape=n); dr = pm.Normal("dr", 0, sd, shape=n)
+    # non-centered parameterization: sample standardized raws, scale by sa/sd.
+    # mixes far better than the centered ar~Normal(0,sa) (fixes low ESS / rhat).
+    ar_raw = pm.Normal("ar_raw", 0, 1, shape=n); dr_raw = pm.Normal("dr_raw", 0, 1, shape=n)
+    ar = ar_raw * sa; dr = dr_raw * sd
     attack = pm.Deterministic("attack", ar - ar.mean())
     defense = pm.Deterministic("defense", dr - dr.mean())
     rho = pm.Normal("rho", 0, 0.1)
@@ -55,7 +58,7 @@ with pm.Model():
     tau = pt.switch((hg == 1) & (ag == 0), 1 + la * rho, tau)
     tau = pt.switch((hg == 1) & (ag == 1), 1 - rho, tau)
     pm.Potential("dc", (w * pt.log(pt.clip(tau, 1e-6, np.inf))).sum())
-    idata = pm.sample(1000, tune=1000, chains=2, cores=1, target_accept=0.9,
+    idata = pm.sample(1000, tune=1000, chains=4, cores=1, target_accept=0.9,
                       random_seed=RNG, progressbar=True)
 
 p = idata.posterior
