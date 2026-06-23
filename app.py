@@ -29,6 +29,12 @@ def teams():
     return {"count": len(P.TEAMS), "teams": P.TEAMS}
 
 
+@app.get("/ratings")
+def ratings():
+    """Per-team attack/defense strength (mean + 90% CI), ranked by overall."""
+    return P.ratings()
+
+
 @app.get("/predict")
 def predict_match(
     home: str = Query(..., description="Home/first team name (see /teams)"),
@@ -36,9 +42,21 @@ def predict_match(
     neutral: bool = Query(True, description="True for a neutral venue (most WC games)"),
     venue: str = Query(None, description="Optional venue country (e.g. 'United States'); "
                                          "derives continuous crowd-support and overrides `neutral`"),
+    extras: str = Query(None, description="Comma-separated optional blocks: "
+                                          "markets, margin, uncertainty (or 'all')"),
 ):
+    ex = None
+    if extras:
+        ex = {x.strip() for x in extras.split(",") if x.strip()}
+        if "all" in ex:
+            ex = set(P.EXTRAS)
+        bad = ex - P.EXTRAS
+        if bad:
+            raise HTTPException(status_code=400,
+                                detail=f"Unknown extras {sorted(bad)}. "
+                                       f"Allowed: {sorted(P.EXTRAS)} (or 'all').")
     try:
-        return P.predict(home, away, neutral, venue)
+        return P.predict(home, away, neutral, venue, extras=ex)
     except KeyError as e:
         raise HTTPException(status_code=404,
                             detail=f"Unknown team {e}. Check /teams for valid names.")
