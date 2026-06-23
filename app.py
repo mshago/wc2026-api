@@ -34,9 +34,11 @@ def predict_match(
     home: str = Query(..., description="Home/first team name (see /teams)"),
     away: str = Query(..., description="Away/second team name (see /teams)"),
     neutral: bool = Query(True, description="True for a neutral venue (most WC games)"),
+    venue: str = Query(None, description="Optional venue country (e.g. 'United States'); "
+                                         "derives continuous crowd-support and overrides `neutral`"),
 ):
     try:
-        return P.predict(home, away, neutral)
+        return P.predict(home, away, neutral, venue)
     except KeyError as e:
         raise HTTPException(status_code=404,
                             detail=f"Unknown team {e}. Check /teams for valid names.")

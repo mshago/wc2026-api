@@ -10,6 +10,7 @@ to refresh team strengths, then redeploy.
 """
 import os, urllib.request
 import numpy as np, pandas as pd, pymc as pm, pytensor.tensor as pt
+import geo
 
 RNG = 42; WINDOW_START = "2021-01-01"; DECAY = 0.40; S = 1500
 DATA_URL = "https://raw.githubusercontent.com/martj42/international_results/master/results.csv"
@@ -29,9 +30,13 @@ teams = sorted(set(m.home_team) | set(m.away_team)); idx = {t: i for i, t in enu
 n = len(teams)
 hi = m.home_team.map(idx).to_numpy(); ai = m.away_team.map(idx).to_numpy()
 hg = m.home_score.to_numpy(); ag = m.away_score.to_numpy()
-neu = m.neutral.to_numpy().astype(float)
+# continuous crowd-support in [-1, +1] from venue geography (see geo.py).
+# replaces the old binary home/neutral switch; a true home game -> ~+1.
+sup = geo.support_array(m.home_team.to_numpy(), m.away_team.to_numpy(), m.country.to_numpy())
 w = np.exp(-DECAY * ((m.date.max() - m.date).dt.days.to_numpy() / 365.25))
-print(f"Training on {len(m)} matches, {n} teams.")
+_nofix = int((~m.country.isin(geo.CENTROIDS)).sum())
+print(f"Training on {len(m)} matches, {n} teams. "
+      f"support: mean {sup.mean():.3f}, {_nofix} matches with unknown venue -> neutral.")
 
 with pm.Model():
     intercept = pm.Normal("intercept", 0, 1); home = pm.Normal("home", 0.25, 0.25)
@@ -40,7 +45,7 @@ with pm.Model():
     attack = pm.Deterministic("attack", ar - ar.mean())
     defense = pm.Deterministic("defense", dr - dr.mean())
     rho = pm.Normal("rho", 0, 0.1)
-    lh = pm.math.exp(intercept + home * (1 - neu) + attack[hi] - defense[ai])
+    lh = pm.math.exp(intercept + home * sup + attack[hi] - defense[ai])
     la = pm.math.exp(intercept + attack[ai] - defense[hi])
     pm.Potential("lh", (w * pm.logp(pm.Poisson.dist(mu=lh), hg)).sum())
     pm.Potential("la", (w * pm.logp(pm.Poisson.dist(mu=la), ag)).sum())

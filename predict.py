@@ -7,6 +7,7 @@ low-score correction baked in).
 import numpy as np
 from pathlib import Path
 from scipy.stats import poisson
+import geo
 
 MAXG = 10
 _PATH = Path(__file__).parent / "model" / "wc2026_poisson_dc_posterior.npz"
@@ -16,15 +17,22 @@ _idx = {str(t): i for i, t in enumerate(_d["teams"])}
 _intc, _hom, _atk, _dfn, _rho = _d["intc"], _d["homv"], _d["atk"], _d["dfn"], _d["rhov"]
 
 
-def predict(home: str, away: str, neutral: bool = True, top_n: int = 10, matrix_size: int = 7):
+def predict(home: str, away: str, neutral: bool = True, venue: str = None,
+            top_n: int = 10, matrix_size: int = 7):
     if home not in _idx:
         raise KeyError(home)
     if away not in _idx:
         raise KeyError(away)
     hh, aa = _idx[home], _idx[away]
 
+    # crowd-support in [-1, +1]; from venue geography when a known `venue`
+    # is given, else the binary fallback (neutral -> 0, home game -> 1).
+    s = geo.support(home, away, venue) if venue else None
+    if s is None:
+        s = 0.0 if neutral else 1.0
+
     # posterior expected goals per draw
-    lh = np.exp(_intc + _hom * (0 if neutral else 1) + _atk[:, hh] - _dfn[:, aa])
+    lh = np.exp(_intc + _hom * s + _atk[:, hh] - _dfn[:, aa])
     la = np.exp(_intc + _atk[:, aa] - _dfn[:, hh])
 
     g = np.arange(MAXG + 1)
@@ -49,6 +57,7 @@ def predict(home: str, away: str, neutral: bool = True, top_n: int = 10, matrix_
 
     return {
         "home": home, "away": away, "neutral": neutral,
+        "venue": venue, "support": round(float(s), 4),
         "expected_goals": {"home": round(float(lh.mean()), 3),
                            "away": round(float(la.mean()), 3)},
         "outcome": {"home_win": round(p_home, 4),
