@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 .venv/
 results.csv
+
+# Personal Claude Code session brief — not shared project conventions
+CLAUDE.md
