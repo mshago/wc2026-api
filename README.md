@@ -1,8 +1,11 @@
 # WC2026 Poisson Predictor — API
 
 Bayesian hierarchical Poisson (Dixon-Coles) model that predicts international
-football match outcomes and scorelines. Trained offline; served as a tiny
-FastAPI app that runs in pure NumPy/SciPy (no PyMC at runtime).
+football match outcomes and scorelines. Team attack/defense strengths use
+**Elo-informed priors**, so low-data teams borrow signal from their longer
+match history instead of defaulting to an uninformative flat prior. Trained
+offline; served as a tiny FastAPI app that runs in pure NumPy/SciPy (no PyMC
+at runtime).
 
 ## How it's split
 
@@ -11,6 +14,12 @@ FastAPI app that runs in pure NumPy/SciPy (no PyMC at runtime).
   Never runs on Railway.
 - **`app.py` + `predict.py`** — runtime. Load the `.npz` and serve predictions.
   Needs only `requirements.txt` (fastapi, uvicorn, numpy, scipy).
+- **`elo.py`** — offline helper used by `train.py`. Computes World Football Elo
+  from the full `results.csv` history and turns it into the priors above. Never
+  imported at runtime.
+- **`backtest.py`** — offline model evaluation: time-holdout log-loss / Brier,
+  split by low-data-team subset, with a prior-ablation arm. The gate for model
+  changes. Uses `requirements-train.txt`; never runs on Railway.
 
 The trained artifact (`model/*.npz`, ~4.7 MB) is committed to the repo, so the
 deploy needs no training step.
@@ -22,12 +31,22 @@ deploy needs no training step.
 | `GET /` | health + usage |
 | `GET /teams` | list of valid team names |
 | `GET /predict?home=France&away=Iraq&neutral=true` | full prediction |
+| `GET /ratings` | per-team attack/defense strength, ranked, with 90% CIs |
+
+`/predict` also accepts two optional query params:
+
+- `venue=<country>` — derives continuous crowd-support from venue geography and
+  **overrides** `neutral` (e.g. `&venue=United States`).
+- `extras=markets,margin,uncertainty` (or `extras=all`) — adds opt-in blocks:
+  over/under & BTTS markets, the goal-margin distribution, and credible-interval
+  bands. Omit for the lean default payload.
 
 Example response (`/predict?home=Argentina&away=Austria`):
 
 ```json
 {
   "home": "Argentina", "away": "Austria", "neutral": true,
+  "venue": null, "support": 0.0,
   "expected_goals": { "home": 1.533, "away": 0.701 },
   "outcome": { "home_win": 0.559, "draw": 0.274, "away_win": 0.167 },
   "most_likely_score": { "home": 1, "away": 0, "prob": 0.156 },
@@ -92,7 +111,8 @@ As more matches are played, re-run training and redeploy:
 ```bash
 pip install -r requirements-train.txt
 rm -f results.csv          # force a fresh download
-python train.py            # regenerates model/*.npz
+python train.py            # regenerates model/*.npz (Elo priors included)
+python backtest.py         # optional: validate before committing
 git commit -am "refresh model" && git push   # Railway redeploys
 ```
 
