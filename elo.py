@@ -45,7 +45,7 @@ def compute_elo_history(df: pd.DataFrame):
     match in date order with columns date, home_team, away_team, elo_home,
     elo_away — the ratings BEFORE that match (unseen team -> BASE).
     """
-    d = df[df.home_score.notna()].sort_values("date")
+    d = df[df.home_score.notna()].sort_values("date", kind="stable")
     hs = d.home_score.astype(int).to_numpy()
     as_ = d.away_score.astype(int).to_numpy()
     ht = d.home_team.to_numpy()

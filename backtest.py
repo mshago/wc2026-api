@@ -141,7 +141,10 @@ def main():
                              "br": float(sum((pv[k] - (k == y)) ** 2 for k in range(3)))})
             pv_base = np.clip(outcome_probs(arms["base"], r.home_team, r.away_team, bool(r.neutral)), 1e-12, 1)
             sb_records["bayesian"].append({"p": tuple(pv_base), "y": y})
-            fx = XGB.fixture_features(train, r.home_team, r.away_team, r.tournament)
+            s = geo.support(r.home_team, r.away_team, r.country)
+            if s is None:
+                s = 0.0 if r.neutral else 1.0
+            fx = XGB.fixture_features(train, r.home_team, r.away_team, r.tournament, support=s)
             pv_xgb = XGB.predict_proba(xgb_model, fx)
             sb_records["xgboost"].append({"p": (pv_xgb["home_win"], pv_xgb["draw"], pv_xgb["away_win"]), "y": y})
         all_sb["bayesian"].extend(sb_records["bayesian"])

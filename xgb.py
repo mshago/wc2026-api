@@ -65,7 +65,7 @@ def _rest(prev_date, date):
 
 def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     """One leak-free feature row per played match (date order). See FEATURES."""
-    d = df[df.home_score.notna()].sort_values("date").reset_index(drop=True)
+    d = df[df.home_score.notna()].sort_values("date", kind="stable").reset_index(drop=True)
     _, pre = ELO.compute_elo_history(d)
     elo_home = pre["elo_home"].to_numpy()
     elo_away = pre["elo_away"].to_numpy()
@@ -92,13 +92,13 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def fixture_features(df: pd.DataFrame, home: str, away: str,
-                     tournament: str = "FIFA World Cup") -> dict:
+                     tournament: str = "FIFA World Cup", support: float = 0.0) -> dict:
     """Latest-state neutral-venue feature dict for an unplayed fixture.
 
     The `tournament` kwarg controls the k_imp feature; defaults to "FIFA World Cup"
     so existing callers (the WC orchestrator) are unchanged.
     """
-    d = df[df.home_score.notna()].sort_values("date").reset_index(drop=True)
+    d = df[df.home_score.notna()].sort_values("date", kind="stable").reset_index(drop=True)
     final_elo, _ = ELO.compute_elo_history(d)
     st = _new_state()
     for r in d.itertuples(index=False):
@@ -113,7 +113,7 @@ def fixture_features(df: pd.DataFrame, home: str, away: str,
         "form_gf_home": sh["gf"], "form_ga_home": sh["ga"], "form_win_home": sh["win"],
         "form_gf_away": sa["gf"], "form_ga_away": sa["ga"], "form_win_away": sa["win"],
         "rest_home": _rest(sh["last"], last), "rest_away": _rest(sa["last"], last),
-        "support": 0.0, "k_imp": ELO._k_base(tournament),
+        "support": support, "k_imp": ELO._k_base(tournament),
     }
 
 
