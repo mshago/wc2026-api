@@ -5,6 +5,7 @@ Run locally:  uvicorn app:app --reload
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import predict as P
+import compare as C
 
 app = FastAPI(title="WC2026 Poisson Predictor", version="1.0.0",
               description="Bayesian hierarchical Poisson (Dixon-Coles) match predictor.")
@@ -60,3 +61,29 @@ def predict_match(
     except KeyError as e:
         raise HTTPException(status_code=404,
                             detail=f"Unknown team {e}. Check /teams for valid names.")
+
+
+@app.get("/compare")
+def compare_match(
+    home: str = Query(..., max_length=64, description="Home team (WC teams only)"),
+    away: str = Query(..., max_length=64, description="Away team (WC teams only)"),
+):
+    """Side-by-side 1X2: Bayesian model (live) vs XGBoost (precomputed, neutral)."""
+    try:
+        bayes = P.predict(home, away, True)["outcome"]
+    except KeyError as e:
+        raise HTTPException(status_code=404,
+                            detail=f"Unknown team {e}. Check /teams for valid names.")
+    try:
+        xgb = C.fixture_probs(C.DATA, home, away)
+    except KeyError:
+        raise HTTPException(status_code=404,
+                            detail=f"No XGBoost prediction for '{home}' vs '{away}'. "
+                                   f"The comparison covers World Cup teams only.")
+    return {"home": home, "away": away, "bayesian": bayes, "xgboost": xgb}
+
+
+@app.get("/compare/scoreboard")
+def compare_scoreboard():
+    """Backtest accuracy of both models on the shared time-holdout."""
+    return C.scoreboard(C.DATA)
