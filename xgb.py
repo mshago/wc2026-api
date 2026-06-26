@@ -13,6 +13,7 @@ import datetime as _dt
 import xgboost as _xgb
 import elo as ELO
 import geo
+import os, json, urllib.request
 
 FORM_K = 10  # rolling window: each team's last K matches feed the form features
 
@@ -164,3 +165,37 @@ def assemble_artifact(fixtures: dict, scoreboard: dict) -> dict:
         "scoreboard": scoreboard,
         "fixtures": fixtures,
     }
+
+
+WINDOW_START = "2021-01-01"
+DATA_URL = "https://raw.githubusercontent.com/martj42/international_results/master/results.csv"
+
+
+def main():
+    if not os.path.exists("results.csv"):
+        print("Downloading results.csv ..."); urllib.request.urlretrieve(DATA_URL, "results.csv")
+    df = pd.read_csv("results.csv"); df["date"] = pd.to_datetime(df["date"])
+    df["neutral"] = df["neutral"].astype(str).str.upper().eq("TRUE")
+    wc26 = df[(df.tournament == "FIFA World Cup") & (df.date.dt.year == 2026)]
+    teams = sorted(set(wc26.home_team) | set(wc26.away_team))
+    train = df[(df.home_score.notna()) & (df.date >= WINDOW_START) &
+               ((df.home_team.isin(teams)) | (df.away_team.isin(teams)))].copy()
+    train["home_score"] = train.home_score.astype(int)
+    train["away_score"] = train.away_score.astype(int)
+    print(f"Training XGBoost on {len(train)} matches, {len(teams)} WC teams ...")
+    model = train_xgb(compute_features(train))
+    fixtures = predict_fixtures(model, train, teams)
+    sb_path = "model/xgb_scoreboard.json"
+    if not os.path.exists(sb_path):
+        raise SystemExit("Run `python backtest.py` first to produce model/xgb_scoreboard.json")
+    with open(sb_path) as f:
+        scoreboard = json.load(f)
+    artifact = assemble_artifact(fixtures, scoreboard)
+    os.makedirs("model", exist_ok=True)
+    with open("model/xgb_compare.json", "w") as f:
+        json.dump(artifact, f)
+    print(f"Saved model/xgb_compare.json ({len(fixtures)} fixtures)")
+
+
+if __name__ == "__main__":
+    main()
