@@ -107,3 +107,56 @@ def fixture_features(df: pd.DataFrame, home: str, away: str) -> dict:
         "rest_home": _rest(sh["last"], last), "rest_away": _rest(sa["last"], last),
         "support": 0.0, "k_imp": ELO._k_base("FIFA World Cup"),
     }
+
+
+import datetime as _dt
+import xgboost as _xgb
+
+_CLASS_KEYS = ("home_win", "draw", "away_win")
+_XGB_PARAMS = {
+    "objective": "multi:softprob",
+    "num_class": 3,
+    "max_depth": 4,
+    "eta": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "seed": 42,
+    "eval_metric": "mlogloss",
+    "verbosity": 0,
+}
+
+
+def train_xgb(feat_df: pd.DataFrame):
+    """Fit a 3-class (home/draw/away) softprob model on the feature table."""
+    X = feat_df[FEATURES].to_numpy()
+    y = feat_df["y"].to_numpy()
+    dtrain = _xgb.DMatrix(X, label=y, feature_names=FEATURES)
+    return _xgb.train(_XGB_PARAMS, dtrain, num_boost_round=300, verbose_eval=False)
+
+
+def predict_proba(model, feat_dict: dict) -> dict:
+    """1X2 probabilities for one feature dict, ordered to match FEATURES."""
+    X = np.array([[feat_dict[f] for f in FEATURES]])
+    dmat = _xgb.DMatrix(X, feature_names=FEATURES)
+    p = model.predict(dmat)[0]
+    return {k: float(p[i]) for i, k in enumerate(_CLASS_KEYS)}
+
+
+def predict_fixtures(model, df: pd.DataFrame, teams) -> dict:
+    """1X2 for every directed pair among `teams`, neutral venue."""
+    out = {}
+    for h in teams:
+        for a in teams:
+            if h == a:
+                continue
+            out[f"{h}|{a}"] = predict_proba(model, fixture_features(df, h, a))
+    return out
+
+
+def assemble_artifact(fixtures: dict, scoreboard: dict) -> dict:
+    return {
+        "generated": _dt.date.today().isoformat(),
+        "neutral": True,
+        "scoreboard": scoreboard,
+        "fixtures": fixtures,
+    }
