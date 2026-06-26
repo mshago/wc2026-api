@@ -37,12 +37,13 @@ def _g_mult(goal_diff: int) -> float:
     return (11 + d) / 8.0
 
 
-def compute_elo(df: pd.DataFrame) -> dict:
-    """Chronological Elo over the played matches in `df`.
+def compute_elo_history(df: pd.DataFrame):
+    """Chronological Elo over played matches in `df`, also returning the
+    PRE-match ratings for every match (leak-free feature input).
 
-    `df` needs columns: date, home_team, away_team, home_score, away_score,
-    neutral (bool), tournament. Returns {team: final_rating}. Pass a date-filtered
-    frame in a backtest so ratings use only information available before the cutoff.
+    Returns (final_elo: dict, pre: pd.DataFrame). `pre` has one row per played
+    match in date order with columns date, home_team, away_team, elo_home,
+    elo_away — the ratings BEFORE that match (unseen team -> BASE).
     """
     d = df[df.home_score.notna()].sort_values("date")
     hs = d.home_score.astype(int).to_numpy()
@@ -51,11 +52,14 @@ def compute_elo(df: pd.DataFrame) -> dict:
     at = d.away_team.to_numpy()
     neu = d.neutral.to_numpy()
     tour = d.tournament.to_numpy()
+    dates = d.date.to_numpy()
     elo: dict = {}
+    rows = []
     for i in range(len(d)):
         h, a = ht[i], at[i]
         rh = elo.get(h, BASE)
         ra = elo.get(a, BASE)
+        rows.append((dates[i], h, a, rh, ra))   # pre-match snapshot
         adv = 0.0 if neu[i] else HFA
         exp_h = 1.0 / (1.0 + 10.0 ** ((ra - rh - adv) / 400.0))
         diff = int(hs[i] - as_[i])
@@ -63,7 +67,19 @@ def compute_elo(df: pd.DataFrame) -> dict:
         delta = _k_base(tour[i]) * _g_mult(diff) * (w - exp_h)
         elo[h] = rh + delta
         elo[a] = ra - delta
-    return elo
+    pre = pd.DataFrame(rows, columns=["date", "home_team", "away_team", "elo_home", "elo_away"])
+    return elo, pre
+
+
+def compute_elo(df: pd.DataFrame) -> dict:
+    """Chronological Elo over the played matches in `df`.
+
+    `df` needs columns: date, home_team, away_team, home_score, away_score,
+    neutral (bool), tournament. Returns {team: final_rating}. Pass a date-filtered
+    frame in a backtest so ratings use only information available before the cutoff.
+    """
+    final, _ = compute_elo_history(df)
+    return final
 
 
 def z_scores(elo: dict, teams) -> np.ndarray:
