@@ -9,6 +9,8 @@ run in the same venv as train.py:
 """
 import numpy as np
 import pandas as pd
+import datetime as _dt
+import xgboost as _xgb
 import elo as ELO
 import geo
 
@@ -108,9 +110,6 @@ def fixture_features(df: pd.DataFrame, home: str, away: str) -> dict:
         "support": 0.0, "k_imp": ELO._k_base("FIFA World Cup"),
     }
 
-
-import datetime as _dt
-import xgboost as _xgb
 
 _CLASS_KEYS = ("home_win", "draw", "away_win")
 _XGB_PARAMS = {

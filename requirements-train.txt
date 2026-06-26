@@ -5,4 +5,3 @@ numpy
 scipy
 matplotlib
 xgboost
-scikit-learn
