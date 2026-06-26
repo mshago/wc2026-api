@@ -45,64 +45,84 @@ def test_fixture_features_returns_feature_dict():
 def test_elo_alignment_stable_sort():
     """Regression test for C1: Elo features must be aligned to the correct match row.
 
-    Design: build a frame where two matches occur on the SAME date (2021-06-01),
-    but one team (Strong) has many prior wins and the other (Weak) has many prior
-    losses, so their pre-match Elos diverge far from BASE before the shared date.
-    If the internal sort in compute_elo_history uses an unstable sort, tied-date rows
-    can be reordered relative to the outer sort in compute_features, causing
-    elo_home[i] to belong to the OTHER same-date match — Strong's row would get
-    Weak's (below-BASE) elo_home and vice versa.  With the stable-sort fix both
-    sorts preserve the same insertion order for tied dates, so identities hold.
+    Prior bug: compute_elo_history and compute_features each independently called
+    sort_values("date") with the default (unstable) sort.  For a tied-date block
+    larger than ~16 rows, numpy/pandas' quicksort does NOT fall back to stable
+    insertion sort, so the two sort passes could produce different orderings of the
+    tied block.  That misaligns elo_home[i] (from compute_elo_history's ordering)
+    to the wrong row in compute_features' iteration.  Fix: both calls use
+    kind="stable" (mergesort).
 
-    The test would FAIL under the old bug when the pandas default (quicksort)
-    happened to swap the two same-date rows between the two independent sort calls.
-    With stable sort the relative order of equal-key rows is always preserved, so
-    the Elo values stay attached to the correct match.
+    Design: 20 prior matches (distinct dates) establish divergent Elo for "Strong"
+    (10 wins → elo > BASE) and "Weak" (10 losses → elo < BASE).  Then 40 matches
+    on a single shared date are appended, with Strong's match first and Weak's last
+    in the tied block.  The 40-row tied block exceeds the 16-element insertion-sort
+    threshold, so an unstable sort CAN permute Strong and Weak's positions between
+    the two sort calls, attaching the wrong elo_home to each row.  With stable sort
+    both calls preserve relative order and the assertions hold.
+
+    To verify sensitivity: temporarily revert both sort_values calls in elo.py and
+    xgb.py to sort_values("date") (no kind= arg) and confirm this test FAILS.
     """
     from elo import BASE
 
-    # Give Strong 6 prior wins (all on distinct dates before the shared date)
-    # and Weak 6 prior losses, so their Elo ratings diverge clearly from BASE.
+    # --- Prior history: Strong wins 10 games, Weak loses 10; all on distinct dates ---
     prior_rows = []
-    for i in range(6):
-        date = f"2021-0{i+1}-01"
-        # Strong beats Dummy1 each month -> builds high Elo
-        prior_rows.append((date, "Strong", "Dummy1", 2, 0, False, "Friendly", "Neutral"))
-        # Weak loses to Dummy2 each month -> builds low Elo
-        prior_rows.append((date, "Dummy2", "Weak",   2, 0, False, "Friendly", "Neutral"))
+    for i in range(10):
+        month = f"{i + 1:02d}"
+        prior_rows.append((f"2021-{month}-01", "Strong", f"Victim{i}",
+                           3, 0, False, "Friendly", "Neutral"))
+        prior_rows.append((f"2021-{month}-02", f"Beater{i}", "Weak",
+                           3, 0, False, "Friendly", "Neutral"))
+    # 20 prior rows → Strong's Elo well above BASE; Weak's well below BASE.
 
-    # Two matches on the SAME shared date: Strong vs Dummy3, Weak vs Dummy4
-    # Row order: Strong first, then Weak (both on "2021-07-01")
-    shared_date = "2021-07-01"
-    prior_rows.append((shared_date, "Strong", "Dummy3", 1, 0, False, "Friendly", "Neutral"))
-    prior_rows.append((shared_date, "Weak",   "Dummy4", 0, 2, False, "Friendly", "Neutral"))
+    # --- 40 matches all on the same date (beats the 16-element insertion-sort limit) ---
+    # Strong's match is at index 0 of the tied block; Weak's is at index 39.
+    # Stable sort preserves this order in both calls → correct Elo alignment.
+    # Unstable quicksort on 40 equal-key rows can permute Strong and Weak's
+    # positions between the two independent sort passes → Elo misalignment.
+    SHARED = "2022-06-01"
+    shared_rows = [
+        (SHARED, "Strong", "FillerOpp_S", 1, 0, False, "Friendly", "Neutral"),
+    ]
+    for k in range(38):
+        shared_rows.append(
+            (SHARED, f"Filler{k:02d}", f"FillerOpp{k:02d}", 1, 1, False, "Friendly", "Neutral")
+        )
+    shared_rows.append(
+        (SHARED, "Weak", "FillerOpp_W", 0, 1, False, "Friendly", "Neutral")
+    )
+    # 40 shared-date rows total.
 
-    df = pd.DataFrame(prior_rows,
-                      columns=["date", "home_team", "away_team", "home_score",
-                               "away_score", "neutral", "tournament", "country"])
+    cols = ["date", "home_team", "away_team", "home_score", "away_score",
+            "neutral", "tournament", "country"]
+    df = pd.DataFrame(prior_rows + shared_rows, columns=cols)
     df["date"] = pd.to_datetime(df["date"])
+    # 60 rows total; 40 share the same date.
 
     feat = xgb.compute_features(df)
 
-    # Identify the two shared-date rows in the feature output
-    shared = feat[feat["date"] == pd.Timestamp(shared_date)]
-    assert len(shared) == 2, "Expected exactly 2 rows for the shared date"
+    shared = feat[feat["date"] == pd.Timestamp(SHARED)]
+    assert len(shared) == 40, f"Expected 40 shared-date rows, got {len(shared)}"
 
     strong_row = shared[shared["home_team"] == "Strong"]
-    weak_row   = shared[shared["home_team"] == "Weak"]
+    weak_row = shared[shared["home_team"] == "Weak"]
+    assert len(strong_row) == 1, "Strong's shared-date row missing from features"
+    assert len(weak_row) == 1, "Weak's shared-date row missing from features"
 
-    assert len(strong_row) == 1, "Strong's shared-date row not found"
-    assert len(weak_row)   == 1, "Weak's shared-date row not found"
-
-    # With correct alignment, Strong (many wins) must have elo_home > BASE,
-    # and Weak (many losses) must have elo_home < BASE.
-    # Under the old unstable-sort bug the elo columns could be swapped between
-    # the two same-date rows, making these assertions fail.
+    # With correct (stable-sort) alignment:
+    #   Strong (10 wins before shared date) → elo_home > BASE
+    #   Weak   (10 losses before shared date) → elo_home < BASE
+    # Under the old unstable-sort bug, the two sort passes produce different orderings
+    # of the 40 tied rows, so Strong and Weak pick up each other's (or a filler's)
+    # Elo value — making one or both of these assertions fail.
     assert strong_row.iloc[0]["elo_home"] > BASE, (
-        f"Strong's elo_home {strong_row.iloc[0]['elo_home']:.1f} should be > BASE {BASE} "
-        "(Elo misaligned — unstable-sort bug not fixed)"
+        f"Strong's elo_home {strong_row.iloc[0]['elo_home']:.1f} should be > BASE {BASE}: "
+        "Elo likely misaligned between compute_elo_history and compute_features "
+        "(unstable-sort bug not fixed)"
     )
     assert weak_row.iloc[0]["elo_home"] < BASE, (
-        f"Weak's elo_home {weak_row.iloc[0]['elo_home']:.1f} should be < BASE {BASE} "
-        "(Elo misaligned — unstable-sort bug not fixed)"
+        f"Weak's elo_home {weak_row.iloc[0]['elo_home']:.1f} should be < BASE {BASE}: "
+        "Elo likely misaligned between compute_elo_history and compute_features "
+        "(unstable-sort bug not fixed)"
     )
