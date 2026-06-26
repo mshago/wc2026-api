@@ -3,14 +3,14 @@
   "n_matches": 763,
   "models": {
     "bayesian": {
-      "hit_rate": 0.6134,
-      "log_loss": 0.8212,
-      "brier": 0.4827
+      "hit_rate": 0.6121,
+      "log_loss": 0.8213,
+      "brier": 0.4828
     },
     "xgboost": {
-      "hit_rate": 0.5675,
-      "log_loss": 0.9729,
-      "brier": 0.5714
+      "hit_rate": 0.5688,
+      "log_loss": 0.9506,
+      "brier": 0.5588
     }
   }
 }
