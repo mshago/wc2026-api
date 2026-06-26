@@ -1,0 +1,16 @@
+{
+  "holdout": "cutoffs 2025-06-01/2025-09-01/2025-12-01, +92d windows",
+  "n_matches": 763,
+  "models": {
+    "bayesian": {
+      "hit_rate": 0.6134,
+      "log_loss": 0.8212,
+      "brier": 0.4827
+    },
+    "xgboost": {
+      "hit_rate": 0.5675,
+      "log_loss": 0.9729,
+      "brier": 0.5714
+    }
+  }
+}
