@@ -90,8 +90,13 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def fixture_features(df: pd.DataFrame, home: str, away: str) -> dict:
-    """Latest-state neutral-venue feature dict for an unplayed fixture."""
+def fixture_features(df: pd.DataFrame, home: str, away: str,
+                     tournament: str = "FIFA World Cup") -> dict:
+    """Latest-state neutral-venue feature dict for an unplayed fixture.
+
+    The `tournament` kwarg controls the k_imp feature; defaults to "FIFA World Cup"
+    so existing callers (the WC orchestrator) are unchanged.
+    """
     d = df[df.home_score.notna()].sort_values("date").reset_index(drop=True)
     final_elo, _ = ELO.compute_elo_history(d)
     st = _new_state()
@@ -107,7 +112,7 @@ def fixture_features(df: pd.DataFrame, home: str, away: str) -> dict:
         "form_gf_home": sh["gf"], "form_ga_home": sh["ga"], "form_win_home": sh["win"],
         "form_gf_away": sa["gf"], "form_ga_away": sa["ga"], "form_win_away": sa["win"],
         "rest_home": _rest(sh["last"], last), "rest_away": _rest(sa["last"], last),
-        "support": 0.0, "k_imp": ELO._k_base("FIFA World Cup"),
+        "support": 0.0, "k_imp": ELO._k_base(tournament),
     }
 
 
