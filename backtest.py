@@ -19,11 +19,26 @@ rejecting xG. To evaluate a NEW change, add a third arm in `fit()` and report it
 Sampling is intentionally light (500/500, 2 chains) for turnaround; both arms use
 identical settings so the comparison is fair even if noisier than train.py.
 """
+import json
 import warnings
 from pathlib import Path
 warnings.filterwarnings("ignore")
 import numpy as np, pandas as pd, pymc as pm, pytensor.tensor as pt
 import geo, elo as ELO
+
+def hit_rate(probs, y) -> bool:
+    return int(np.argmax(probs)) == int(y)
+
+
+def metrics(records) -> dict:
+    """Aggregate hit-rate / log-loss / brier from [{'p':(p0,p1,p2),'y':int}, ...]."""
+    n = len(records)
+    hits = sum(hit_rate(r["p"], r["y"]) for r in records)
+    ll = np.mean([-np.log(np.clip(r["p"][r["y"]], 1e-12, 1)) for r in records])
+    br = np.mean([sum((r["p"][k] - (k == r["y"])) ** 2 for k in range(3)) for r in records])
+    return {"hit_rate": round(hits / n, 4), "log_loss": round(float(ll), 4),
+            "brier": round(float(br), 4)}
+
 
 RNG = 42; WINDOW_START = "2021-01-01"; DECAY = 0.10; MAXG = 10
 LOWDATA_MAX = 64                       # <= this many in-fold games == "low-data"
@@ -98,7 +113,9 @@ def outcome_probs(model, home, away, neutral):
 
 
 def main():
+    import xgb as XGB
     rows = []
+    all_sb = {"bayesian": [], "xgboost": []}
     for co in CUTOFFS:
         co = pd.Timestamp(co)
         train = df[(df.home_score.notna()) & (df.date >= WINDOW_START) & (df.date < co) &
@@ -113,6 +130,8 @@ def main():
             continue
         print(f"cutoff {co.date()}: fit on {len(train)} matches, score {len(test)} ...")
         arms = {"base": fit(train, True), "flat": fit(train, False)}
+        xgb_model = XGB.train_xgb(XGB.compute_features(train))
+        sb_records = {"bayesian": [], "xgboost": []}
         for _, r in test.iterrows():
             y = 0 if r.home_score > r.away_score else (1 if r.home_score == r.away_score else 2)
             low = (r.home_team in lowdata) or (r.away_team in lowdata)
@@ -120,6 +139,16 @@ def main():
                 pv = np.clip(outcome_probs(mdl, r.home_team, r.away_team, bool(r.neutral)), 1e-12, 1)
                 rows.append({"arm": arm, "low": low, "ll": -np.log(pv[y]),
                              "br": float(sum((pv[k] - (k == y)) ** 2 for k in range(3)))})
+            pv_base = np.clip(outcome_probs(arms["base"], r.home_team, r.away_team, bool(r.neutral)), 1e-12, 1)
+            sb_records["bayesian"].append({"p": tuple(pv_base), "y": y})
+            s = geo.support(r.home_team, r.away_team, r.country)
+            if s is None:
+                s = 0.0 if r.neutral else 1.0
+            fx = XGB.fixture_features(train, r.home_team, r.away_team, r.tournament, support=s)
+            pv_xgb = XGB.predict_proba(xgb_model, fx)
+            sb_records["xgboost"].append({"p": (pv_xgb["home_win"], pv_xgb["draw"], pv_xgb["away_win"]), "y": y})
+        all_sb["bayesian"].extend(sb_records["bayesian"])
+        all_sb["xgboost"].extend(sb_records["xgboost"])
 
     R = pd.DataFrame(rows)
     print(f"\n=== {len(R[R.arm=='base'])} held-out matches across {len(CUTOFFS)} cutoffs ===\n")
@@ -135,6 +164,17 @@ def main():
         if {"base", "flat"} <= set(g.index):
             dll = 100 * (g.loc["flat", "ll"] - g.loc["base", "ll"]) / g.loc["flat", "ll"]
             print(f"        base vs flat: log-loss {dll:+.2f}%\n")
+
+    scoreboard = {
+        "holdout": f"cutoffs {'/'.join(CUTOFFS)}, +{HORIZON}d windows",
+        "n_matches": len(all_sb["bayesian"]),
+        "models": {"bayesian": metrics(all_sb["bayesian"]),
+                   "xgboost": metrics(all_sb["xgboost"])},
+    }
+    Path("model").mkdir(exist_ok=True)
+    with open("model/xgb_scoreboard.json", "w") as f:
+        json.dump(scoreboard, f, indent=2)
+    print("Wrote model/xgb_scoreboard.json:", scoreboard["models"])
 
 
 if __name__ == "__main__":
