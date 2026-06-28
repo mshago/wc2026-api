@@ -4,6 +4,7 @@ Loads the posterior draws produced offline by train.py and computes
 posterior-predictive scoreline probabilities (with the Dixon-Coles
 low-score correction baked in).
 """
+import json
 import numpy as np
 from pathlib import Path
 from scipy.stats import poisson
@@ -15,6 +16,22 @@ _d = np.load(_PATH, allow_pickle=True)
 TEAMS = sorted(map(str, _d["teams"]))
 _idx = {str(t): i for i, t in enumerate(_d["teams"])}
 _intc, _hom, _atk, _dfn, _rho = _d["intc"], _d["homv"], _d["atk"], _d["dfn"], _d["rhov"]
+
+_VERSION_PATH = Path(__file__).parent / "model" / "version.json"
+
+
+def _load_version():
+    """Model build metadata written by train.py; '{}' if not present yet
+    (e.g. a deploy made before the first automated refresh)."""
+    try:
+        with open(_VERSION_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+
+# build metadata; `latest_match_date` is the frontend's cache key
+VERSION = _load_version()
 
 # score-matrix index helpers (home goals = row i, away goals = col j)
 _I, _J = np.indices((MAXG + 1, MAXG + 1))

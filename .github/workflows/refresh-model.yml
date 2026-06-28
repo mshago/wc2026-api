@@ -1,0 +1,91 @@
+name: refresh-model
+
+# Retrains the model from the latest international results and commits the new
+# artifacts; Railway redeploys on the push to main. Training deps (pymc,
+# xgboost) run ONLY here in CI — never in the runtime image.
+
+on:
+  schedule:
+    - cron: "0 6 * * *"        # daily 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      run_backtest:
+        description: "Also regenerate the comparison scoreboard (slow: fits PyMC backtest arms)"
+        type: boolean
+        default: false
+      force:
+        description: "Retrain even if results.csv has no new matches"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-model
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install OpenMP runtime (xgboost needs it)
+        run: sudo apt-get update && sudo apt-get install -y libgomp1
+
+      - name: Install training dependencies
+        run: pip install -r requirements-train.txt
+
+      - name: Download latest results.csv
+        run: curl -fsSL -o results.csv https://raw.githubusercontent.com/martj42/international_results/master/results.csv
+
+      - name: Decide whether to retrain
+        id: gate
+        run: |
+          python - <<'PY'
+          import json, os
+          import pandas as pd
+          fresh = len(pd.read_csv("results.csv"))
+          try:
+              prev = json.load(open("model/version.json")).get("csv_rows", -1)
+          except FileNotFoundError:
+              prev = -1
+          force = os.environ.get("FORCE", "false") == "true"
+          should = force or fresh > prev
+          print(f"fresh_rows={fresh} committed_rows={prev} force={force} -> should_train={should}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"should_train={'true' if should else 'false'}\n")
+          PY
+        env:
+          FORCE: ${{ github.event.inputs.force }}
+
+      - name: Retrain Bayesian posterior
+        if: steps.gate.outputs.should_train == 'true'
+        run: python train.py
+
+      - name: Refresh comparison scoreboard (manual/weekly only)
+        if: steps.gate.outputs.should_train == 'true' && github.event.inputs.run_backtest == 'true'
+        run: python backtest.py
+
+      - name: Refresh comparison fixtures
+        if: steps.gate.outputs.should_train == 'true'
+        run: python xgb.py
+
+      - name: Commit and push refreshed artifacts
+        if: steps.gate.outputs.should_train == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A model/
+          if git diff --cached --quiet; then
+            echo "No artifact changes to commit."
+          else
+            VER=$(python -c "import json; print(json.load(open('model/version.json'))['latest_match_date'])")
+            git commit -m "chore: auto-refresh model (latest match $VER)"
+            git push
+          fi
