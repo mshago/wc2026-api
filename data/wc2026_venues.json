@@ -1,0 +1,19 @@
+{
+  "_comment": "WC2026 stadium -> host country, for deriving home advantage. football-data.org's `venue` is a stadium string; unknown venue -> treated as neutral. Extend with the exact venue strings football-data returns.",
+  "MetLife Stadium": "United States",
+  "AT&T Stadium": "United States",
+  "NRG Stadium": "United States",
+  "Arrowhead Stadium": "United States",
+  "Mercedes-Benz Stadium": "United States",
+  "Hard Rock Stadium": "United States",
+  "Lincoln Financial Field": "United States",
+  "Levi's Stadium": "United States",
+  "Lumen Field": "United States",
+  "SoFi Stadium": "United States",
+  "Gillette Stadium": "United States",
+  "BMO Field": "Canada",
+  "BC Place": "Canada",
+  "Estadio Azteca": "Mexico",
+  "Estadio Akron": "Mexico",
+  "Estadio BBVA": "Mexico"
+}

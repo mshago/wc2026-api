@@ -2,10 +2,12 @@
 WC2026 Poisson Predictor — FastAPI service.
 Run locally:  uvicorn app:app --reload
 """
+import os
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import predict as P
 import compare as C
+import fixtures as F
 
 app = FastAPI(title="WC2026 Poisson Predictor", version="1.0.0",
               description="Bayesian hierarchical Poisson (Dixon-Coles) match predictor.")
@@ -89,3 +91,22 @@ def compare_match(
 def compare_scoreboard():
     """Backtest accuracy of both models on the shared time-holdout."""
     return C.scoreboard(C.DATA)
+
+
+@app.get("/fixtures")
+def fixtures(
+    status: str = Query(None, max_length=64,
+                        description="football-data status filter, e.g. SCHEDULED,TIMED,IN_PLAY"),
+    stage: str = Query(None, max_length=32,
+                       description="Stage filter, e.g. GROUP_STAGE, LAST_16, FINAL"),
+):
+    """World Cup fixtures from football-data.org, with team names normalized to
+    /teams names and a derived neutral flag — ready for /predict and /compare."""
+    key = os.environ.get("FOOTBALL_DATA_API_KEY")
+    if not key:
+        raise HTTPException(status_code=503,
+                            detail="Schedule unavailable: FOOTBALL_DATA_API_KEY not configured.")
+    try:
+        return F.get_fixtures(P.TEAMS, {"status": status, "stage": stage}, key)
+    except F.UpstreamError as e:
+        raise HTTPException(status_code=502, detail=f"Schedule provider error: {e}")
