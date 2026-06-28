@@ -84,6 +84,16 @@ def test_get_fixtures_transforms_and_caches(monkeypatch):
     assert calls["n"] == 1
 
 
+def test_live_football_data_names_resolve_to_known_teams():
+    # names football-data.org actually returns for WC2026 that differ from ours
+    import predict as P
+    known = set(P.TEAMS)
+    for fd_name in ["Bosnia-Herzegovina", "Cape Verde Islands", "Korea Republic",
+                    "USA", "IR Iran", "Czechia", "Congo DR"]:
+        canonical = fixtures.map_name(fd_name)
+        assert canonical in known, f"{fd_name!r} -> {canonical!r} not in /teams"
+
+
 def test_route_503_without_key(monkeypatch):
     monkeypatch.delenv("FOOTBALL_DATA_API_KEY", raising=False)
     with TestClient(APP.app) as client:
