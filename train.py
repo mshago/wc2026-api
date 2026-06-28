@@ -8,7 +8,7 @@ model/wc2026_poisson_dc_posterior.npz, then commit the new .npz.
 Re-run whenever results.csv updates (e.g. as more WC games are played)
 to refresh team strengths, then redeploy.
 """
-import os, urllib.request
+import os, urllib.request, json, datetime
 import numpy as np, pandas as pd, pymc as pm, pytensor.tensor as pt
 import geo, elo
 
@@ -84,3 +84,13 @@ np.savez_compressed("model/wc2026_poisson_dc_posterior.npz",
                     rhov=p["rho"].values.reshape(-1)[sel],
                     teams=np.array(teams))
 print("Saved model/wc2026_poisson_dc_posterior.npz")
+
+# build metadata: cache key for the API (latest_match_date) + the row-count
+# marker the CI refresh gate compares against to decide whether to retrain.
+with open("model/version.json", "w", encoding="utf-8") as f:
+    json.dump({"trained_at": datetime.datetime.now(datetime.timezone.utc)
+                                       .strftime("%Y-%m-%dT%H:%M:%SZ"),
+               "latest_match_date": m.date.max().strftime("%Y-%m-%d"),
+               "n_matches": int(len(m)),
+               "csv_rows": int(len(df))}, f, indent=2)
+print(f"Saved model/version.json (latest_match_date {m.date.max():%Y-%m-%d}, csv_rows {len(df)})")

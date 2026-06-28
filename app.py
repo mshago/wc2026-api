@@ -20,6 +20,8 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"],
 def root():
     return {"status": "ok",
             "model": "bayesian-poisson-dixon-coles",
+            "model_version": P.VERSION.get("latest_match_date"),
+            "model_trained_at": P.VERSION.get("trained_at"),
             "teams_available": len(P.TEAMS),
             "usage": "/predict?home=France&away=Iraq&neutral=true"}
 
